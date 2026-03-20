@@ -112,14 +112,14 @@ static int cr_lib_load(int stage, char *path)
 	void *h;
 	bool allocated = false;
 
-	pr_msg("[torchpass] cr_lib_load: dlopen(%s, RTLD_LAZY)\n", path);
+	pr_err("[torchpass] cr_lib_load: dlopen(%s, RTLD_LAZY)\n", path);
 	h = dlopen(path, RTLD_LAZY);
 	if (h == NULL) {
-		pr_msg("[torchpass] cr_lib_load: dlopen FAILED: %s\n", dlerror());
+		pr_err("[torchpass] cr_lib_load: dlopen FAILED: %s\n", dlerror());
 		pr_err("Unable to load %s: %s\n", path, dlerror());
 		return -1;
 	}
-	pr_msg("[torchpass] cr_lib_load: dlopen OK for %s\n", path);
+	pr_err("[torchpass] cr_lib_load: dlopen OK for %s\n", path);
 
 	/*
 	 * Load plugin descriptor. If plugin is too old -- create
@@ -229,14 +229,14 @@ int cr_plugin_init(int stage)
 		}
 	}
 
-	pr_msg("[torchpass] cr_plugin_init: libdir=%s\n", opts.libdir);
+	pr_err("[torchpass] cr_plugin_init: libdir=%s\n", opts.libdir);
 	d = opendir(opts.libdir);
 	if (d == NULL) {
 		pr_perror("[torchpass] opendir(%s) FAILED", opts.libdir);
 		pr_perror("Unable to open directory %s", opts.libdir);
 		return -1;
 	}
-	pr_msg("[torchpass] opendir(%s) OK\n", opts.libdir);
+	pr_err("[torchpass] opendir(%s) OK\n", opts.libdir);
 
 	while (1) {
 		char path[PATH_MAX];
