@@ -118,6 +118,41 @@
 
 struct pstree_item *current;
 
+/*
+ * TorchPass debug: pause-and-wait checkpoints for restore debugging.
+ * Set CRIU_DEBUG_PAUSE=1 to enable.
+ * Marker: /tmp/.criu-restore-checkpoint-<N>
+ * Signal: /tmp/.criu-restore-continue-<N>
+ */
+static void criu_debug_checkpoint(int stage, const char *label)
+{
+	char marker[256], signal_path[256];
+	const char *env;
+	int fd;
+	struct stat st;
+
+	env = getenv("CRIU_DEBUG_PAUSE");
+	if (!env || strcmp(env, "1") != 0)
+		return;
+
+	snprintf(marker, sizeof(marker), "/tmp/.criu-restore-checkpoint-%d", stage);
+	snprintf(signal_path, sizeof(signal_path), "/tmp/.criu-restore-continue-%d", stage);
+
+	pr_err("[torchpass] CHECKPOINT %d: %s -- waiting for %s\n", stage, label, signal_path);
+
+	fd = open(marker, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd >= 0) {
+		ssize_t __attribute__((unused)) n = write(fd, label, strlen(label));
+		close(fd);
+	}
+
+	while (stat(signal_path, &st) != 0)
+		usleep(500000);
+
+	pr_err("[torchpass] CHECKPOINT %d: %s -- continuing\n", stage, label);
+	unlink(signal_path);
+}
+
 static int restore_task_with_children(void *);
 static int sigreturn_restore(pid_t pid, struct task_restore_args *ta, unsigned long alen, CoreEntry *core);
 static int prepare_restorer_blob(void);
@@ -2084,6 +2119,7 @@ static int restore_root_task(struct pstree_item *init)
 
 	__restore_switch_stage_nw(CR_STATE_ROOT_TASK);
 
+	criu_debug_checkpoint(1, "before fork_with_pid(init)");
 	ret = fork_with_pid(init);
 	if (ret < 0)
 		goto out;
@@ -2162,9 +2198,11 @@ static int restore_root_task(struct pstree_item *init)
 	__restore_switch_stage(CR_STATE_FORKING);
 
 skip_ns_bouncing:
+	criu_debug_checkpoint(2, "before POST_FORKING plugin hook");
 	ret = run_plugins(POST_FORKING);
 	if (ret < 0 && ret != -ENOTSUP)
 		goto out_kill;
+	criu_debug_checkpoint(3, "after POST_FORKING, before catch_tasks");
 
 	ret = restore_wait_inprogress_tasks();
 	if (ret < 0)
@@ -2251,10 +2289,12 @@ skip_ns_bouncing:
 	pids = xzalloc(sizeof(pid_t) * task_entries->nr_threads);
 	if (!pids)
 		goto out_kill_network_unlocked;
+	criu_debug_checkpoint(4, "before catch_tasks");
 	if (catch_tasks(pids, task_entries->nr_threads)) {
 		pr_err("Can't catch all tasks\n");
 		goto out_kill_network_unlocked;
 	}
+	criu_debug_checkpoint(5, "after catch_tasks, before CR_STATE_COMPLETE");
 
 	if (lazy_pages_finish_restore())
 		goto out_kill_network_unlocked;
@@ -2284,6 +2324,7 @@ skip_ns_bouncing:
 	 * mapped memory) could be done sanely once the pie code hands
 	 * over the control to master process.
 	 */
+	criu_debug_checkpoint(6, "before RESUME_DEVICES_LATE (cuda plugin restore)");
 	pr_info("Run late stage hook from criu master for external devices\n");
 	for_each_pstree_item(item) {
 		if (!task_alive(item))
@@ -2308,10 +2349,12 @@ skip_ns_bouncing:
 	if (restore_freezer_state())
 		pr_err("Unable to restore freezer state\n");
 
+	criu_debug_checkpoint(7, "after RESUME_DEVICES_LATE, before finalize_restore_detach");
 	/* Detaches from processes and they continue run through sigreturn. */
 	if (finalize_restore_detach())
 		goto out_kill_network_unlocked;
 
+	criu_debug_checkpoint(8, "restore finished successfully");
 	pr_info("Restore finished successfully. Tasks resumed.\n");
 	write_stats(RESTORE_STATS);
 
